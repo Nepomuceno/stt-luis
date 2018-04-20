@@ -5,9 +5,27 @@
     <title>Speech Sample</title>
     <meta charset="utf-8" />
     <script src="http://ajax.googleapis.com/ajax/libs/jquery/1.9.0/jquery.min.js"></script>
+    <link rel="stylesheet" media="all" href="./recordbtn.css">
+    <link rel="stylesheet" media="all" href="./status.css">
 </head>
 
 <body style="font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:13px;">
+    <div>
+        <div id="status">
+            <span id="statusCircle" class="dotOff">Off</span>
+        </div>
+        <div id="incidents"></div>
+        <button id="record">
+            <div class="container">
+                <input type="checkbox" id="btnRecord" />
+                <label for="btnRecord"></label>
+                <div class="time">
+                    <div class="h_m"></div>
+                    <div class="s_ms"></div>
+                </div>
+            </div>
+        </button>
+    </div>
     <div id="warning">
         <h1 style="font-weight:500;">Speech Recognition SDK not found.</h1>
         <h2 style="font-weight:500;">Please execute
@@ -230,7 +248,7 @@
                         console.log(JSON.stringify(event.Result)); // check console for other information in result
                         break;
                     case "SpeechSimplePhraseEvent":
-                        UpdateRecognizedPhrase(JSON.stringify(event.Result, null, 3));
+                        UpdateRecognizedPhrase(event.Result);
                         break;
                     case "SpeechDetailedPhraseEvent":
                         UpdateRecognizedPhrase(event.Result);
@@ -277,7 +295,7 @@
                     "q": query,
                 };
                 $.ajax({
-                    url: "https://westus.api.cognitive.microsoft.com/luis/v2.0/apps/"+ luisId + "?a=1" + $.param(params),
+                    url: "https://westus.api.cognitive.microsoft.com/luis/v2.0/apps/" + luisId + "?a=1" + $.param(params),
                     beforeSend: function (xhrObj) {
                         // Request headers
                         xhrObj.setRequestHeader("Ocp-Apim-Subscription-Key", luisKey);
@@ -301,6 +319,7 @@
 
     <!-- Browser Hooks -->
     <script>
+        var incidents = [];
         var startBtn, stopBtn, hypothesisDiv, phraseDiv, statusDiv, luisResult;
         var key, languageOptions, formatOptions, recognitionMode, inputSource, filePicker;
         var SDK;
@@ -308,8 +327,15 @@
         var previousSubscriptionKey;
 
         document.addEventListener("DOMContentLoaded", function () {
+            recordBtn = document.getElementById("btnRecord");
+            statusCircle = document.getElementById("statusCircle");
+            incidentlist = document.getElementById("incidents");
+            
             createBtn = document.getElementById("createBtn");
+
+
             startBtn = document.getElementById("startBtn");
+
             stopBtn = document.getElementById("stopBtn");
             phraseDiv = document.getElementById("phraseDiv");
             luisResult = document.getElementById("luisResult");
@@ -321,7 +347,54 @@
             filePicker = document.getElementById('filePicker');
 
             recognitionMode.addEventListener("change", Setup);
+            
+            recordBtn.addEventListener("change", () => {
+                console.log("recording");
+                if (recordBtn.checked) {
+                    if (key.value == "" || key.value == "YOUR_BING_SPEECH_API_KEY") {
+                        alert("Please enter your Bing Speech subscription key!");
+                        return;
+                    }
+                    if (inputSource.value === "File") {
+                        filePicker.click();
+                    } else {
+                        if (!recognizer || previousSubscriptionKey != key.value) {
+                            previousSubscriptionKey = key.value;
+                            Setup();
+                        }
 
+                        hypothesisDiv.innerHTML = "";
+                        phraseDiv.innerHTML = "";
+                        RecognizerStart(SDK, recognizer);
+                    }
+                }
+            });
+            renderIncidents = () => {
+                incidentlist.innerHTML = "";
+                var ul = document.createElement("ul");
+                incidents.forEach(i => {
+                    let location = "unknown location";
+                    let incident = "generic";
+                    if(i.entities)
+                    {
+                        i.entities.forEach(e => {
+                            if(e.type === "Incident")
+                            {
+                                incident = e.resolution.values[0];
+                            }
+                            if(e.type === "Calendar.Location")
+                            {
+                                location = e.entity;
+                            }
+                        });
+                    }
+                    let li = document.createElement("li");
+                    let text = document.createTextNode(`${incident} incident at ${i.date.toLocaleDateString()} ${i.date.toLocaleTimeString()} on ${location}`);
+                    li.appendChild(text);
+                    ul.appendChild(li);
+                });
+                incidentlist.appendChild(ul);
+            }
             startBtn.addEventListener("click", function () {
                 if (key.value == "" || key.value == "YOUR_BING_SPEECH_API_KEY") {
                     alert("Please enter your Bing Speech subscription key!");
@@ -407,15 +480,32 @@
         function UpdateRecognizedPhrase(result) {
             hypothesisDiv.innerHTML = "";
             luisResult.innerHTML += "";
-            result.NBest.forEach(l => {
-                getLuis(l.Lexical);
-            })
+            if (result.NBest) {
+                result.NBest.forEach(l => {
+                    getLuis(l.Lexical);
+                });
+            }
+            if(result.DisplayText){
+                getLuis(result.DisplayText);
+            }
             phraseDiv.innerHTML += JSON.stringify(result, null, 2) + "\n";
         }
 
         function UpdateLuisIntent(intent) {
+
             if (intent.topScoringIntent.intent !== "None") {
+                if (intent.topScoringIntent.intent === "Clock in") {
+                    console.log("clock in");
+                    statusCircle.className = "dotOn";
+                }
+                if (intent.topScoringIntent.intent === "Clock out") {
+                    statusCircle.className = "dotOff";
+                }
+                if (intent.topScoringIntent.intent === "Open incident") {
+                    incidents.push({entities: intent.entities, date: new Date()})
+                }
                 luisResult.innerHTML += JSON.stringify(intent, null, 2) + "\n";
+                renderIncidents();
             } else {
                 luisResult.innerHTML += "Not able to find intent for :" + intent.query + "\n";
             }
@@ -423,8 +513,9 @@
         }
 
         function OnComplete() {
+            recordBtn.checked = false;
             startBtn.disabled = false;
-            stopBtn.disabled = true;
+            stopBtn.disabled = true;r
         }
     </script>
 </body>
